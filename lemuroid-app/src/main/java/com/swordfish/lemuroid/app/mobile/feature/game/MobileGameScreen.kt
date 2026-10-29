@@ -32,11 +32,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layoutId
@@ -58,6 +60,8 @@ import com.swordfish.touchinput.radial.LemuroidPadTheme
 import com.swordfish.touchinput.radial.LocalLemuroidPadTheme
 import com.swordfish.touchinput.radial.sensors.TiltConfiguration
 import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager
+import com.swordfish.touchinput.radial.settings.ControlLayoutBinding
+import com.swordfish.touchinput.radial.settings.LocalControlLayoutBinding
 import com.swordfish.touchinput.radial.ui.GlassSurface
 import com.swordfish.touchinput.radial.ui.LemuroidButtonPressFeedback
 import gg.padkit.PadKit
@@ -68,9 +72,13 @@ import gg.padkit.inputstate.InputState
 fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val isLandscape = constraints.maxWidth > constraints.maxHeight
-        var customShortcutsEditing by remember { mutableStateOf(false) }
+        val editing = viewModel.isEditControlShown().collectAsState(false).value
+        val controlBounds = remember { mutableStateMapOf<String, Rect>() }
+        val previewOffsets = remember { mutableStateMapOf<String, IntOffset>() }
 
         LaunchedEffect(isLandscape) {
+            controlBounds.clear()
+            previewOffsets.clear()
             val orientation =
                 if (isLandscape) {
                     TouchControllerSettingsManager.Orientation.LANDSCAPE
@@ -185,23 +193,30 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                             )
                         }
 
-                        leftGamePad?.invoke(
-                            this,
-                            Modifier.layoutId(GameScreenLayout.CONSTRAINTS_LEFT_PAD),
-                            touchControllerSettings,
-                        )
-                        rightGamePad?.invoke(
-                            this,
-                            Modifier.layoutId(GameScreenLayout.CONSTRAINTS_RIGHT_PAD),
-                            touchControllerSettings,
-                        )
+                        CompositionLocalProvider(
+                            LocalControlLayoutBinding provides ControlLayoutBinding(
+                                positions = touchControllerSettings.controlPositions,
+                                preview = previewOffsets,
+                                reportBounds = { id, rect -> if (controlBounds[id] != rect) controlBounds[id] = rect },
+                            ),
+                        ) {
+                            leftGamePad?.invoke(
+                                this,
+                                Modifier.layoutId(GameScreenLayout.CONSTRAINTS_LEFT_PAD),
+                                touchControllerSettings,
+                            )
+                            rightGamePad?.invoke(
+                                this,
+                                Modifier.layoutId(GameScreenLayout.CONSTRAINTS_RIGHT_PAD),
+                                touchControllerSettings,
+                            )
+                        }
 
                         GameScreenRunningCentralMenu(
                             modifier = Modifier.layoutId(GameScreenLayout.CONSTRAINTS_GAME_CONTAINER),
                             controllerConfig = currentControllerConfig,
                             touchControllerSettings = touchControllerSettings,
                             viewModel = viewModel,
-                            onEditShortcuts = { customShortcutsEditing = true },
                         )
                     }
                 }
@@ -211,9 +226,45 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
         CustomShortcutOverlay(
             viewModel = viewModel,
             isLandscape = isLandscape,
-            editing = customShortcutsEditing,
-            onFinishEditing = { customShortcutsEditing = false },
+            editing = editing,
+            onFinishEditing = { viewModel.showEditControls(false) },
         )
+
+
+        if (editing && touchControllerSettings != null && touchControlsVisibleState.value) {
+            val density = LocalDensity.current.density
+            ControlDragEditor(
+                bounds = controlBounds,
+                onDrag = { key, offset ->
+                    val old = previewOffsets[key] ?: IntOffset.Zero
+                    previewOffsets[key] = IntOffset(old.x + offset.x, old.y + offset.y)
+                },
+                onDragEnd = { key ->
+                    val displacement = previewOffsets[key] ?: IntOffset.Zero
+                    val previous = touchControllerSettings.controlPositions[key]
+                        ?: TouchControllerSettingsManager.ControlPosition()
+                    viewModel.updateTouchControllerSettings(touchControllerSettings.copy(
+                        controlPositions = touchControllerSettings.controlPositions + (
+                            key to previous.copy(
+                                dxDp = previous.dxDp + displacement.x / density,
+                                dyDp = previous.dyDp + displacement.y / density,
+                            )
+                        ),
+                    ))
+                    previewOffsets.remove(key)
+                },
+                onReset = {
+                    previewOffsets.clear()
+                    viewModel.updateTouchControllerSettings(
+                        touchControllerSettings.copy(controlPositions = emptyMap()),
+                    )
+                },
+                onDone = {
+                    previewOffsets.clear()
+                    viewModel.showEditControls(false)
+                },
+            )
+        }
 
         val isLoading =
             viewModel.loadingState
@@ -249,7 +300,6 @@ private fun GameScreenRunningCentralMenu(
     viewModel: BaseGameScreenViewModel,
     touchControllerSettings: TouchControllerSettingsManager.Settings,
     controllerConfig: ControllerConfig,
-    onEditShortcuts: () -> Unit,
 ) {
     val menuPressed = viewModel.isMenuPressed().collectAsState(false)
     Box(
@@ -261,7 +311,7 @@ private fun GameScreenRunningCentralMenu(
             animationDurationMillis = MENU_LOADING_ANIMATION_MILLIS,
             icon = R.drawable.button_menu,
         )
-        MenuEditTouchControls(viewModel, controllerConfig, touchControllerSettings, onEditShortcuts)
+        // Editing now uses the direct-manipulation editor over the game screen.
     }
 }
 
