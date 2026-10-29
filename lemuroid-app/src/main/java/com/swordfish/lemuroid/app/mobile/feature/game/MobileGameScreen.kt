@@ -68,6 +68,7 @@ import gg.padkit.inputstate.InputState
 fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val isLandscape = constraints.maxWidth > constraints.maxHeight
+        var customShortcutsEditing by remember { mutableStateOf(false) }
 
         LaunchedEffect(isLandscape) {
             val orientation =
@@ -200,11 +201,19 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                             controllerConfig = currentControllerConfig,
                             touchControllerSettings = touchControllerSettings,
                             viewModel = viewModel,
+                            onEditShortcuts = { customShortcutsEditing = true },
                         )
                     }
                 }
             }
         }
+
+        CustomShortcutOverlay(
+            viewModel = viewModel,
+            isLandscape = isLandscape,
+            editing = customShortcutsEditing,
+            onFinishEditing = { customShortcutsEditing = false },
+        )
 
         val isLoading =
             viewModel.loadingState
@@ -240,6 +249,7 @@ private fun GameScreenRunningCentralMenu(
     viewModel: BaseGameScreenViewModel,
     touchControllerSettings: TouchControllerSettingsManager.Settings,
     controllerConfig: ControllerConfig,
+    onEditShortcuts: () -> Unit,
 ) {
     val menuPressed = viewModel.isMenuPressed().collectAsState(false)
     Box(
@@ -251,7 +261,7 @@ private fun GameScreenRunningCentralMenu(
             animationDurationMillis = MENU_LOADING_ANIMATION_MILLIS,
             icon = R.drawable.button_menu,
         )
-        MenuEditTouchControls(viewModel, controllerConfig, touchControllerSettings)
+        MenuEditTouchControls(viewModel, controllerConfig, touchControllerSettings, onEditShortcuts)
     }
 }
 
@@ -260,6 +270,7 @@ private fun MenuEditTouchControls(
     viewModel: BaseGameScreenViewModel,
     controllerConfig: ControllerConfig,
     touchControllerSettings: TouchControllerSettingsManager.Settings,
+    onEditShortcuts: () -> Unit,
 ) {
     val showEditControls = viewModel.isEditControlShown().collectAsState(false)
     if (!showEditControls.value) return
@@ -320,6 +331,12 @@ private fun MenuEditTouchControls(
                             },
                         )
                     }
+                }
+                TextButton(onClick = {
+                    viewModel.showEditControls(false)
+                    onEditShortcuts()
+                }) {
+                    Text("Move Quick Save / Quick Load / Cheats")
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),

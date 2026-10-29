@@ -1,0 +1,29 @@
+name: Lemuroid custom debug APK
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [master]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: android-actions/setup-android@v3
+      - name: Build separate debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew :lemuroid-app:assembleFreeBundleDebug --no-configuration-cache --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lemuroid-custom-debug-apk
+          path: lemuroid-app/build/outputs/apk/freeBundle/debug/*.apk
+          if-no-files-found: error
