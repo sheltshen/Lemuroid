@@ -76,6 +76,16 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
         val controlBounds = remember { mutableStateMapOf<String, Rect>() }
         val previewOffsets = remember { mutableStateMapOf<String, IntOffset>() }
 
+        // The drag editor is transactional. Each move updates this local draft immediately.
+        // Store the complete layout only on Done, avoiding stale flow snapshots overwriting
+        // positions when several controls are dragged in rapid succession.
+        var draftPositions by remember(isLandscape, editing) {
+            mutableStateOf<Map<String, TouchControllerSettingsManager.ControlPosition>?>(null)
+        }
+        var optimisticPositions by remember(isLandscape) {
+            mutableStateOf<Map<String, TouchControllerSettingsManager.ControlPosition>?>(null)
+        }
+
         LaunchedEffect(isLandscape) {
             controlBounds.clear()
             previewOffsets.clear()
@@ -88,15 +98,33 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
             viewModel.onScreenOrientationChanged(orientation)
         }
 
-        val controllerConfigState = viewModel.getTouchControllerConfig().collectAsState(null)
-        val touchControlsVisibleState = viewModel.isTouchControllerVisible().collectAsState(false)
-        val touchControllerSettingsState =
-            viewModel
-                .getTouchControlsSettings(LocalDensity.current, WindowInsets.displayCutout)
-                .collectAsState(null)
+        val controllerConfigFlow = remember(viewModel) { viewModel.getTouchControllerConfig() }
+        val touchVisibilityFlow = remember(viewModel) { viewModel.isTouchControllerVisible() }
+        val density = LocalDensity.current
+        val touchSettingsFlow = remember(viewModel, density) {
+            viewModel.getTouchControlsSettings(density, WindowInsets.displayCutout)
+        }
+        val controllerConfigState = controllerConfigFlow.collectAsState(null)
+        val touchControlsVisibleState = touchVisibilityFlow.collectAsState(false)
+        val touchControllerSettingsState = touchSettingsFlow.collectAsState(null)
 
         val touchControllerSettings = touchControllerSettingsState.value
         val currentControllerConfig = controllerConfigState.value
+
+        // After Done, keep the just-saved layout visible until the settings flow
+        // acknowledges the persisted value. Otherwise the controls briefly jump home.
+        LaunchedEffect(optimisticPositions, touchControllerSettings?.controlPositions) {
+            if (optimisticPositions != null &&
+                touchControllerSettings?.controlPositions == optimisticPositions
+            ) {
+                optimisticPositions = null
+            }
+        }
+        val visiblePositions = if (editing) {
+            draftPositions ?: touchControllerSettings?.controlPositions.orEmpty()
+        } else {
+            optimisticPositions ?: touchControllerSettings?.controlPositions.orEmpty()
+        }
 
         val tiltConfiguration = viewModel.getTiltConfiguration().collectAsState(TiltConfiguration.Disabled)
         val tiltSimulatedStates = viewModel.getSimulatedTiltEvents().collectAsState(InputState())
@@ -195,7 +223,7 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
 
                         CompositionLocalProvider(
                             LocalControlLayoutBinding provides ControlLayoutBinding(
-                                positions = touchControllerSettings.controlPositions,
+                                positions = visiblePositions,
                                 preview = previewOffsets,
                                 reportBounds = { id, rect -> if (controlBounds[id] != rect) controlBounds[id] = rect },
                             ),
@@ -232,7 +260,7 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
 
 
         if (editing && touchControllerSettings != null && touchControlsVisibleState.value) {
-            val density = LocalDensity.current.density
+            val densityPxPerDp = LocalDensity.current.density
             ControlDragEditor(
                 bounds = controlBounds,
                 onDrag = { key, offset ->
@@ -241,26 +269,30 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                 },
                 onDragEnd = { key ->
                     val displacement = previewOffsets[key] ?: IntOffset.Zero
-                    val previous = touchControllerSettings.controlPositions[key]
+                    val baseline = draftPositions ?: touchControllerSettings.controlPositions
+                    val previous = baseline[key]
                         ?: TouchControllerSettingsManager.ControlPosition()
-                    viewModel.updateTouchControllerSettings(touchControllerSettings.copy(
-                        controlPositions = touchControllerSettings.controlPositions + (
-                            key to previous.copy(
-                                dxDp = previous.dxDp + displacement.x / density,
-                                dyDp = previous.dyDp + displacement.y / density,
-                            )
-                        ),
-                    ))
+                    draftPositions = baseline + (
+                        key to previous.copy(
+                            dxDp = previous.dxDp + displacement.x / densityPxPerDp,
+                            dyDp = previous.dyDp + displacement.y / densityPxPerDp,
+                        )
+                    )
                     previewOffsets.remove(key)
                 },
                 onReset = {
                     previewOffsets.clear()
-                    viewModel.updateTouchControllerSettings(
-                        touchControllerSettings.copy(controlPositions = emptyMap()),
-                    )
+                    draftPositions = emptyMap()
                 },
                 onDone = {
+                    // Commit once, atomically as one Settings object; multiple rapid drags
+                    // no longer launch competing writes built from stale StateFlow values.
+                    val finalPositions = draftPositions ?: touchControllerSettings.controlPositions
+                    optimisticPositions = finalPositions
                     previewOffsets.clear()
+                    viewModel.updateTouchControllerSettings(
+                        touchControllerSettings.copy(controlPositions = finalPositions),
+                    )
                     viewModel.showEditControls(false)
                 },
             )
