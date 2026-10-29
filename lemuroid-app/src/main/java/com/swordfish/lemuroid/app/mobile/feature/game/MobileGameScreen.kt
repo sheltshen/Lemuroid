@@ -103,8 +103,9 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
         val controllerConfigFlow = remember(viewModel) { viewModel.getTouchControllerConfig() }
         val touchVisibilityFlow = remember(viewModel) { viewModel.isTouchControllerVisible() }
         val density = LocalDensity.current
-        val touchSettingsFlow = remember(viewModel, density) {
-            viewModel.getTouchControlsSettings(density, WindowInsets.displayCutout)
+        val displayCutout = WindowInsets.displayCutout
+        val touchSettingsFlow = remember(viewModel, density, displayCutout) {
+            viewModel.getTouchControlsSettings(density, displayCutout)
         }
         val controllerConfigState = controllerConfigFlow.collectAsState(null)
         val touchControlsVisibleState = touchVisibilityFlow.collectAsState(false)
