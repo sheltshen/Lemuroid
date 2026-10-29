@@ -8,13 +8,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 
@@ -32,12 +33,12 @@ private fun label(key: String) = when(key) {
 @Composable
 fun ControlDragEditor(
     bounds: Map<String, Rect>,
-    onDrag: (String, IntOffset) -> Unit,
-    onDragEnd: (String) -> Unit,
+    onDrag: (String, Offset) -> Unit,
     onReset: () -> Unit,
     onDone: () -> Unit,
 ) {
     val density = LocalDensity.current
+    val currentOnDrag by androidx.compose.runtime.rememberUpdatedState(onDrag)
     Box(Modifier.fillMaxSize()) {
         bounds.forEach { (key,rect) ->
             if (rect.width <= 0f || rect.height <= 0f) return@forEach
@@ -51,11 +52,9 @@ fun ControlDragEditor(
                     .background(Color(0x22FFCB47),RoundedCornerShape(10.dp))
                     .pointerInput(key) {
                         detectDragGestures(
-                            onDragEnd = { onDragEnd(key) },
-                            onDragCancel = { onDragEnd(key) },
-                            onDrag = { change,d ->
+                            onDrag = { change, delta ->
                                 change.consume()
-                                onDrag(key,IntOffset(d.x.roundToInt(),d.y.roundToInt()))
+                                currentOnDrag(key, delta)
                             },
                         )
                     },

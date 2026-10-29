@@ -14,7 +14,6 @@ import kotlin.math.roundToInt
 /** Placement changes only: original PadKit input processing stays intact. */
 data class ControlLayoutBinding(
     val positions: Map<String, TouchControllerSettingsManager.ControlPosition>,
-    val preview: Map<String, IntOffset>,
     val reportBounds: (String, Rect) -> Unit,
 )
 
@@ -25,11 +24,10 @@ fun Modifier.controlLayout(key: String): Modifier {
     val binding = LocalControlLayoutBinding.current ?: return this
     val density = LocalDensity.current.density
     val shift = binding.positions[key] ?: TouchControllerSettingsManager.ControlPosition()
-    val extra = binding.preview[key] ?: IntOffset.Zero
     return this.offset {
         IntOffset(
-            (shift.dxDp * density).roundToInt() + extra.x,
-            (shift.dyDp * density).roundToInt() + extra.y,
+            (shift.dxDp * density).roundToInt(),
+            (shift.dyDp * density).roundToInt(),
         )
     }.onGloballyPositioned { binding.reportBounds(key, it.boundsInRoot()) }
 }

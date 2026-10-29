@@ -40,7 +40,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layoutId
@@ -76,7 +75,8 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
         val isLandscape = constraints.maxWidth > constraints.maxHeight
         val editing = viewModel.isEditControlShown().collectAsState(false).value
         val controlBounds = remember { mutableStateMapOf<String, Rect>() }
-        val previewOffsets = remember { mutableStateMapOf<String, IntOffset>() }
+        // Each drag delta updates the live draft. Pointer cancellation can no longer drop
+        // a control move, and Done persists precisely the currently visible positions.
 
         // The drag editor is transactional. Each move updates this local draft immediately.
         // Store the complete layout only on Done, avoiding stale flow snapshots overwriting
@@ -90,7 +90,6 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
 
         LaunchedEffect(isLandscape) {
             controlBounds.clear()
-            previewOffsets.clear()
             val orientation =
                 if (isLandscape) {
                     TouchControllerSettingsManager.Orientation.LANDSCAPE
@@ -227,7 +226,6 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                         CompositionLocalProvider(
                             LocalControlLayoutBinding provides ControlLayoutBinding(
                                 positions = visiblePositions,
-                                preview = previewOffsets,
                                 reportBounds = { id, rect -> if (controlBounds[id] != rect) controlBounds[id] = rect },
                             ),
                         ) {
@@ -262,37 +260,29 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
         )
 
 
+
         if (editing && touchControllerSettings != null && touchControlsVisibleState.value) {
-            val densityPxPerDp = LocalDensity.current.density
+            val pixelsPerDp = LocalDensity.current.density
             ControlDragEditor(
                 bounds = controlBounds,
-                onDrag = { key, offset ->
-                    val old = previewOffsets[key] ?: IntOffset.Zero
-                    previewOffsets[key] = IntOffset(old.x + offset.x, old.y + offset.y)
-                },
-                onDragEnd = { key ->
-                    val displacement = previewOffsets[key] ?: IntOffset.Zero
-                    val baseline = draftPositions ?: touchControllerSettings.controlPositions
-                    val previous = baseline[key]
-                        ?: TouchControllerSettingsManager.ControlPosition()
-                    draftPositions = baseline + (
+                onDrag = { key, delta ->
+                    // Mutate the draft on EVERY drag delta, rather than onDragEnd.
+                    // Moving other buttons cannot revert previous positions.
+                    val current = draftPositions ?: touchControllerSettings.controlPositions
+                    val previous = current[key] ?: TouchControllerSettingsManager.ControlPosition()
+                    draftPositions = current + (
                         key to previous.copy(
-                            dxDp = previous.dxDp + displacement.x / densityPxPerDp,
-                            dyDp = previous.dyDp + displacement.y / densityPxPerDp,
+                            dxDp = previous.dxDp + delta.x / pixelsPerDp,
+                            dyDp = previous.dyDp + delta.y / pixelsPerDp,
                         )
                     )
-                    previewOffsets.remove(key)
                 },
                 onReset = {
-                    previewOffsets.clear()
                     draftPositions = emptyMap()
                 },
                 onDone = {
-                    // Commit once, atomically as one Settings object; multiple rapid drags
-                    // no longer launch competing writes built from stale StateFlow values.
                     val finalPositions = draftPositions ?: touchControllerSettings.controlPositions
                     optimisticPositions = finalPositions
-                    previewOffsets.clear()
                     viewModel.updateTouchControllerSettings(
                         touchControllerSettings.copy(controlPositions = finalPositions),
                     )
