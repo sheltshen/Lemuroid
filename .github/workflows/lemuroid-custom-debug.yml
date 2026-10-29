@@ -17,7 +17,8 @@ jobs:
           distribution: temurin
           java-version: '17'
           cache: gradle
-      - uses: android-actions/setup-android@v3
+      # GitHub-hosted Ubuntu runners already include the Android SDK.
+      # setup-android@v3 currently fails installing the retired 'tools' SDK package.
       - name: Build separate debug APK
         run: |
           chmod +x gradlew
