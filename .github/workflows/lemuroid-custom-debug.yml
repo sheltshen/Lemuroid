@@ -1,5 +1,7 @@
 name: Lemuroid custom debug APK
 on:
+  push:
+    branches: [feature/custom-touch-controls]
   workflow_dispatch:
   pull_request:
     branches: [master]
