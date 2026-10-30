@@ -27,6 +27,8 @@ private fun label(key: String) = when(key) {
     "start" -> "Start"
     "select" -> "Select"
     "menu" -> "Menu"
+    "mic" -> "Mic"
+    "close_screen" -> "Screen"
     else -> key.uppercase()
 }
 

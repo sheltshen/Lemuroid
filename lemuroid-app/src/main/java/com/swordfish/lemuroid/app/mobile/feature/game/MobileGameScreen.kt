@@ -69,6 +69,45 @@ import gg.padkit.PadKit
 import gg.padkit.config.HapticFeedbackType
 import gg.padkit.inputstate.InputState
 
+/**
+ * Fallback hit boxes for the DS microphone and close-screen controls. Their native
+ * PadKit button modifiers already use controlLayout("mic"/"close_screen") for saved
+ * offsets; only the missing drag-editor hit boxes are synthesized here.
+ *
+ * Anchor to the unshifted D-pad position so moving the D-pad doesn't carry either
+ * independent DS button along with it.
+ */
+private fun dsExtraControlEditorBounds(
+    measuredBounds: Map<String, Rect>,
+    positions: Map<String, TouchControllerSettingsManager.ControlPosition>,
+    density: Float,
+): Map<String, Rect> {
+    val dpad = measuredBounds["dpad"] ?: return measuredBounds
+    if (dpad.width <= 0f || dpad.height <= 0f) return measuredBounds
+
+    val dpadShift = positions["dpad"] ?: TouchControllerSettingsManager.ControlPosition()
+    val baseLeft = dpad.left - dpadShift.dxDp * density
+    val baseBottom = dpad.bottom - dpadShift.dyDp * density
+    val diameter =
+        (measuredBounds["l"]?.width?.takeIf { it > 0f } ?: dpad.width * 0.30f)
+            .coerceAtMost(dpad.width * 0.34f)
+    val centerY = baseBottom + dpad.height * 0.08f
+
+    return measuredBounds.toMutableMap().apply {
+        listOf("mic" to 0.12f, "close_screen" to 0.80f).forEach { (key, xFraction) ->
+            val buttonShift = positions[key] ?: TouchControllerSettingsManager.ControlPosition()
+            val centerX = baseLeft + dpad.width * xFraction + buttonShift.dxDp * density
+            val y = centerY + buttonShift.dyDp * density
+            this[key] = Rect(
+                centerX - diameter / 2f,
+                y - diameter / 2f,
+                centerX + diameter / 2f,
+                y + diameter / 2f,
+            )
+        }
+    }
+}
+
 @Composable
 fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -271,8 +310,18 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
 
         if (editing && touchControllerSettings != null && touchControlsVisibleState.value) {
             val pixelsPerDp = LocalDensity.current.density
+            // PadKit renders the two optional DS controls (microphone and screen-close)
+            // outside the primary D-pad dial. On some DS layouts their modifier bounds
+            // aren't surfaced to the editor; derive edit hit-boxes from the D-pad geometry
+            // while retaining the native buttons and their existing input handlers.
+            val editorBounds =
+                if (controllerId == "MELONDS" || controllerId == "DESMUME") {
+                    dsExtraControlEditorBounds(controlBounds, visiblePositions, pixelsPerDp)
+                } else {
+                    controlBounds
+                }
             ControlDragEditor(
-                bounds = controlBounds,
+                bounds = editorBounds,
                 onDrag = { key, delta ->
                     // Mutate the draft on EVERY drag delta, rather than onDragEnd.
                     // Moving other buttons cannot revert previous positions.
