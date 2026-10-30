@@ -75,20 +75,14 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
         val isLandscape = constraints.maxWidth > constraints.maxHeight
         val editing = viewModel.isEditControlShown().collectAsState(false).value
         val controlBounds = remember { mutableStateMapOf<String, Rect>() }
-        var shortcutResetRequest by remember(viewModel) { mutableStateOf(0) }
+        var shortcutResetRevision by remember(viewModel) { mutableStateOf(0) }
+        val context = LocalContext.current
         // Each drag delta updates the live draft. Pointer cancellation can no longer drop
         // a control move, and Done persists precisely the currently visible positions.
 
         // The drag editor is transactional. Each move updates this local draft immediately.
         // Store the complete layout only on Done, avoiding stale flow snapshots overwriting
         // positions when several controls are dragged in rapid succession.
-        var draftPositions by remember(isLandscape, editing) {
-            mutableStateOf<Map<String, TouchControllerSettingsManager.ControlPosition>?>(null)
-        }
-        var optimisticPositions by remember(isLandscape) {
-            mutableStateOf<Map<String, TouchControllerSettingsManager.ControlPosition>?>(null)
-        }
-
         LaunchedEffect(isLandscape) {
             controlBounds.clear()
             val orientation =
@@ -113,6 +107,16 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
 
         val touchControllerSettings = touchControllerSettingsState.value
         val currentControllerConfig = controllerConfigState.value
+        val controllerId = currentControllerConfig?.touchControllerID?.name
+
+        // Also key the edit draft by controller type, so switching from DS to
+        // GBA never briefly displays or commits the other console's draft.
+        var draftPositions by remember(controllerId, isLandscape, editing) {
+            mutableStateOf<Map<String, TouchControllerSettingsManager.ControlPosition>?>(null)
+        }
+        var optimisticPositions by remember(controllerId, isLandscape) {
+            mutableStateOf<Map<String, TouchControllerSettingsManager.ControlPosition>?>(null)
+        }
 
         // After Done, keep the just-saved layout visible until the settings flow
         // acknowledges the persisted value. Otherwise the controls briefly jump home.
@@ -253,12 +257,15 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
             }
         }
 
-        CustomShortcutOverlay(
-            viewModel = viewModel,
-            isLandscape = isLandscape,
-            editing = editing,
-            resetRequest = shortcutResetRequest,
-        )
+        if (controllerId != null) {
+            CustomShortcutOverlay(
+                viewModel = viewModel,
+                isLandscape = isLandscape,
+                editing = editing,
+                controllerId = controllerId,
+                resetRevision = shortcutResetRevision,
+            )
+        }
 
 
 
@@ -280,7 +287,10 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                 },
                 onReset = {
                     draftPositions = emptyMap()
-                    shortcutResetRequest += 1
+                    if (controllerId != null) {
+                        resetConsoleShortcuts(context, controllerId, isLandscape)
+                        shortcutResetRevision += 1
+                    }
                 },
                 onDone = {
                     val finalPositions = draftPositions ?: touchControllerSettings.controlPositions

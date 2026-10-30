@@ -33,7 +33,8 @@ fun CustomShortcutOverlay(
     viewModel: com.swordfish.lemuroid.app.shared.game.BaseGameScreenViewModel,
     isLandscape: Boolean,
     editing: Boolean,
-    resetRequest: Int,
+    controllerId: String,
+    resetRevision: Int,
 ) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("custom_shortcuts_v1", Context.MODE_PRIVATE) }
@@ -42,23 +43,16 @@ fun CustomShortcutOverlay(
         if (isLandscape) mapOf("save" to Offset(.74f,.04f),"load" to Offset(.82f,.04f),"cheats" to Offset(.90f,.04f))
         else mapOf("save" to Offset(.57f,.04f),"load" to Offset(.70f,.04f),"cheats" to Offset(.83f,.04f))
     }
-    val positions = remember(isLandscape) {
-        mutableStateMapOf<String,Offset>().apply {
-            defaults.forEach { (id,point) ->
-                this[id] = Offset(prefs.getFloat("${orientation}_${id}_x",point.x),prefs.getFloat("${orientation}_${id}_y",point.y))
-            }
-        }
-    }
-    // The single Reset controls button at the top resets BOTH native controls
-    // and the three shortcut positions.
-    LaunchedEffect(resetRequest) {
-        if (resetRequest > 0) {
+    // Each console type and orientation has independent shortcut positions.
+    // resetRevision re-reads only the current profile after Reset controls.
+    val positions = remember(controllerId, isLandscape, resetRevision) {
+        migrateLegacyGbaShortcuts(prefs, controllerId, orientation)
+        mutableStateMapOf<String, Offset>().apply {
             defaults.forEach { (id, point) ->
-                positions[id] = point
-                prefs.edit()
-                    .remove("${orientation}_${id}_x")
-                    .remove("${orientation}_${id}_y")
-                    .apply()
+                this[id] = Offset(
+                    prefs.getFloat(shortcutKey(controllerId, orientation, id, "x"), point.x),
+                    prefs.getFloat(shortcutKey(controllerId, orientation, id, "y"), point.y),
+                )
             }
         }
     }
@@ -76,12 +70,14 @@ fun CustomShortcutOverlay(
                 modifier = Modifier
                     .offset { IntOffset(x,y) }
                     .size(46.dp)
-                    .then(if(editing) Modifier.pointerInput(id,orientation) {
+                    .then(if(editing) Modifier.pointerInput(id,orientation,controllerId) {
                         detectDragGestures(
                             onDragEnd = {
                                 val current = positions[id] ?: defaults.getValue(id)
-                                prefs.edit().putFloat("${orientation}_${id}_x",current.x)
-                                    .putFloat("${orientation}_${id}_y",current.y).apply()
+                                prefs.edit()
+                                    .putFloat(shortcutKey(controllerId, orientation, id, "x"), current.x)
+                                    .putFloat(shortcutKey(controllerId, orientation, id, "y"), current.y)
+                                    .apply()
                             },
                             onDrag = { change,delta ->
                                 change.consume()
@@ -113,6 +109,57 @@ fun CustomShortcutOverlay(
         }
     }
     if(cheatsVisible) CheatCodeDialog(viewModel,prefs,onDismiss={cheatsVisible=false})
+}
+
+/** Profile keys are scoped by console type and orientation, not shared globally. */
+private fun shortcutKey(
+    controllerId: String,
+    orientation: String,
+    id: String,
+    axis: String,
+): String = "console_${controllerId}_${orientation}_${id}_${axis}"
+
+/**
+ * Older builds used orientation-only keys. Preserve the previous GBA arrangement
+ * once, without giving other consoles the same shared values.
+ */
+private fun migrateLegacyGbaShortcuts(
+    prefs: android.content.SharedPreferences,
+    controllerId: String,
+    orientation: String,
+) {
+    if (controllerId != "GBA") return
+    val migrationKey = "migration_shortcuts_GBA_${orientation}_v2"
+    if (prefs.getBoolean(migrationKey, false)) return
+    val editor = prefs.edit()
+    for (id in listOf("save", "load", "cheats")) {
+        for (axis in listOf("x", "y")) {
+            val oldKey = "${orientation}_${id}_${axis}"
+            val newKey = shortcutKey(controllerId, orientation, id, axis)
+            if (prefs.contains(oldKey) && !prefs.contains(newKey)) {
+                editor.putFloat(newKey, prefs.getFloat(oldKey, 0f))
+            }
+        }
+    }
+    editor.putBoolean(migrationKey, true).apply()
+}
+
+/** Reset the shortcut positions of the SELECTED console/orientation only. */
+fun resetConsoleShortcuts(
+    context: Context,
+    controllerId: String,
+    isLandscape: Boolean,
+) {
+    val orientation = if (isLandscape) "landscape" else "portrait"
+    val prefs = context.getSharedPreferences("custom_shortcuts_v1", Context.MODE_PRIVATE)
+    val editor = prefs.edit()
+    for (id in listOf("save", "load", "cheats")) {
+        editor.remove(shortcutKey(controllerId, orientation, id, "x"))
+        editor.remove(shortcutKey(controllerId, orientation, id, "y"))
+    }
+    // Prevent a reset GBA layout from importing legacy positions again.
+    if (controllerId == "GBA") editor.putBoolean("migration_shortcuts_GBA_${orientation}_v2", true)
+    editor.apply()
 }
 
 private data class CheatCode(val name:String,val code:String,val enabled:Boolean)
