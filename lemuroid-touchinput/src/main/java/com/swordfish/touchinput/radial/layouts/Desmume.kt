@@ -18,6 +18,7 @@ import com.swordfish.touchinput.radial.layouts.shared.SecondaryButtonR
 import com.swordfish.touchinput.radial.layouts.shared.SecondaryButtonSelect
 import com.swordfish.touchinput.radial.layouts.shared.SecondaryButtonStart
 import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager
+import com.swordfish.touchinput.radial.settings.controlLayout
 import com.swordfish.touchinput.radial.ui.LemuroidButtonForeground
 import gg.padkit.PadKitScope
 import gg.padkit.ids.Id
@@ -38,12 +39,12 @@ fun PadKitScope.DesmumeLeft(
             SecondaryButtonSelect(position = 2)
             SecondaryButtonMenuPlaceholder(settings)
             LemuroidControlButton(
-                modifier = Modifier.radialPosition(-120f),
+                modifier = Modifier.radialPosition(-120f).controlLayout("mic"),
                 id = Id.Key(KeyEvent.KEYCODE_BUTTON_THUMBL),
                 icon = R.drawable.button_mic,
             )
             LemuroidControlButton(
-                modifier = Modifier.radialPosition(-60f),
+                modifier = Modifier.radialPosition(-60f).controlLayout("close_screen"),
                 id = Id.Key(KeyEvent.KEYCODE_BUTTON_L2),
                 icon = R.drawable.button_close_screen,
             )
