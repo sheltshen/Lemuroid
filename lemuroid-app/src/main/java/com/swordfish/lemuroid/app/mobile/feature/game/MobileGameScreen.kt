@@ -75,6 +75,7 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
         val isLandscape = constraints.maxWidth > constraints.maxHeight
         val editing = viewModel.isEditControlShown().collectAsState(false).value
         val controlBounds = remember { mutableStateMapOf<String, Rect>() }
+        var shortcutResetRequest by remember(viewModel) { mutableStateOf(0) }
         // Each drag delta updates the live draft. Pointer cancellation can no longer drop
         // a control move, and Done persists precisely the currently visible positions.
 
@@ -256,7 +257,7 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
             viewModel = viewModel,
             isLandscape = isLandscape,
             editing = editing,
-            onFinishEditing = { viewModel.showEditControls(false) },
+            resetRequest = shortcutResetRequest,
         )
 
 
@@ -279,6 +280,7 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                 },
                 onReset = {
                     draftPositions = emptyMap()
+                    shortcutResetRequest += 1
                 },
                 onDone = {
                     val finalPositions = draftPositions ?: touchControllerSettings.controlPositions

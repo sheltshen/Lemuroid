@@ -33,7 +33,7 @@ fun CustomShortcutOverlay(
     viewModel: com.swordfish.lemuroid.app.shared.game.BaseGameScreenViewModel,
     isLandscape: Boolean,
     editing: Boolean,
-    onFinishEditing: () -> Unit,
+    resetRequest: Int,
 ) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("custom_shortcuts_v1", Context.MODE_PRIVATE) }
@@ -46,6 +46,19 @@ fun CustomShortcutOverlay(
         mutableStateMapOf<String,Offset>().apply {
             defaults.forEach { (id,point) ->
                 this[id] = Offset(prefs.getFloat("${orientation}_${id}_x",point.x),prefs.getFloat("${orientation}_${id}_y",point.y))
+            }
+        }
+    }
+    // The single Reset controls button at the top resets BOTH native controls
+    // and the three shortcut positions.
+    LaunchedEffect(resetRequest) {
+        if (resetRequest > 0) {
+            defaults.forEach { (id, point) ->
+                positions[id] = point
+                prefs.edit()
+                    .remove("${orientation}_${id}_x")
+                    .remove("${orientation}_${id}_y")
+                    .apply()
             }
         }
     }
@@ -96,17 +109,6 @@ fun CustomShortcutOverlay(
                             tint=Color.DarkGray,modifier=Modifier.size(24.dp))
                     }
                 }
-            }
-        }
-        if(editing) {
-            Row(Modifier.align(Alignment.BottomCenter).padding(bottom=12.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                Button(onClick = {
-                    defaults.forEach { (id,point) ->
-                        positions[id]=point
-                        prefs.edit().remove("${orientation}_${id}_x").remove("${orientation}_${id}_y").apply()
-                    }
-                }) { Text("Reset shortcuts") }
-                Button(onClick=onFinishEditing) { Text("Done") }
             }
         }
     }
