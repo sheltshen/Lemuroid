@@ -1,0 +1,32 @@
+name: Lemuroid custom debug APK
+on:
+  push:
+    branches: [feature/custom-touch-controls]
+  workflow_dispatch:
+  pull_request:
+    branches: [master]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      # GitHub-hosted Ubuntu runners already include the Android SDK.
+      # setup-android@v3 currently fails installing the retired 'tools' SDK package.
+      - name: Build separate debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew :lemuroid-app:assembleFreeBundleDebug --no-configuration-cache --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lemuroid-custom-debug-apk
+          path: lemuroid-app/build/outputs/apk/freeBundle/debug/*.apk
+          if-no-files-found: error

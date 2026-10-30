@@ -6,6 +6,7 @@ import androidx.compose.runtime.State
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import com.swordfish.touchinput.radial.LocalLemuroidPadTheme
+import com.swordfish.touchinput.radial.settings.controlLayout
 import com.swordfish.touchinput.radial.ui.LemuroidControlBackground
 import com.swordfish.touchinput.radial.ui.LemuroidCrossForeground
 import gg.padkit.PadKitScope
@@ -17,6 +18,7 @@ context(PadKitScope)
 fun LemuroidControlCross(
     modifier: Modifier = Modifier,
     id: Id.DiscreteDirection,
+    layoutKey: String = "dpad",
     allowDiagonals: Boolean = true,
     background: @Composable () -> Unit = {
         LemuroidControlBackground()
@@ -30,7 +32,7 @@ fun LemuroidControlCross(
 ) {
     val theme = LocalLemuroidPadTheme.current
     ControlCross(
-        modifier = modifier.padding(theme.padding),
+        modifier = modifier.controlLayout(layoutKey).padding(theme.padding),
         id = id,
         allowDiagonals = allowDiagonals,
         background = background,

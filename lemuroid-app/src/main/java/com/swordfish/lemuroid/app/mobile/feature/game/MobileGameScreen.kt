@@ -31,7 +31,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,18 +61,69 @@ import com.swordfish.touchinput.radial.LemuroidPadTheme
 import com.swordfish.touchinput.radial.LocalLemuroidPadTheme
 import com.swordfish.touchinput.radial.sensors.TiltConfiguration
 import com.swordfish.touchinput.radial.settings.TouchControllerSettingsManager
+import com.swordfish.touchinput.radial.settings.ControlLayoutBinding
+import com.swordfish.touchinput.radial.settings.LocalControlLayoutBinding
 import com.swordfish.touchinput.radial.ui.GlassSurface
 import com.swordfish.touchinput.radial.ui.LemuroidButtonPressFeedback
 import gg.padkit.PadKit
 import gg.padkit.config.HapticFeedbackType
 import gg.padkit.inputstate.InputState
 
+/**
+ * Fallback hit boxes for the DS microphone and close-screen controls. Their native
+ * PadKit button modifiers already use controlLayout("mic"/"close_screen") for saved
+ * offsets; only the missing drag-editor hit boxes are synthesized here.
+ *
+ * Anchor to the unshifted D-pad position so moving the D-pad doesn't carry either
+ * independent DS button along with it.
+ */
+private fun dsExtraControlEditorBounds(
+    measuredBounds: Map<String, Rect>,
+    positions: Map<String, TouchControllerSettingsManager.ControlPosition>,
+    density: Float,
+): Map<String, Rect> {
+    val dpad = measuredBounds["dpad"] ?: return measuredBounds
+    if (dpad.width <= 0f || dpad.height <= 0f) return measuredBounds
+
+    val dpadShift = positions["dpad"] ?: TouchControllerSettingsManager.ControlPosition()
+    val baseLeft = dpad.left - dpadShift.dxDp * density
+    val baseBottom = dpad.bottom - dpadShift.dyDp * density
+    val diameter =
+        (measuredBounds["l"]?.width?.takeIf { it > 0f } ?: dpad.width * 0.30f)
+            .coerceAtMost(dpad.width * 0.34f)
+    val centerY = baseBottom + dpad.height * 0.08f
+
+    return measuredBounds.toMutableMap().apply {
+        listOf("mic" to 0.12f, "close_screen" to 0.80f).forEach { (key, xFraction) ->
+            val buttonShift = positions[key] ?: TouchControllerSettingsManager.ControlPosition()
+            val centerX = baseLeft + dpad.width * xFraction + buttonShift.dxDp * density
+            val y = centerY + buttonShift.dyDp * density
+            this[key] = Rect(
+                centerX - diameter / 2f,
+                y - diameter / 2f,
+                centerX + diameter / 2f,
+                y + diameter / 2f,
+            )
+        }
+    }
+}
+
 @Composable
 fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val isLandscape = constraints.maxWidth > constraints.maxHeight
+        val editing = viewModel.isEditControlShown().collectAsState(false).value
+        val controlBounds = remember { mutableStateMapOf<String, Rect>() }
+        var shortcutResetRevision by remember(viewModel) { mutableStateOf(0) }
+        val context = LocalContext.current
+        // Each drag delta updates the live draft. Pointer cancellation can no longer drop
+        // a control move, and Done persists precisely the currently visible positions.
 
+        // The drag editor is transactional. Each move updates this local draft immediately.
+        // Store the complete layout only on Done, avoiding stale flow snapshots overwriting
+        // positions when several controls are dragged in rapid succession.
         LaunchedEffect(isLandscape) {
+            controlBounds.clear()
             val orientation =
                 if (isLandscape) {
                     TouchControllerSettingsManager.Orientation.LANDSCAPE
@@ -79,15 +133,44 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
             viewModel.onScreenOrientationChanged(orientation)
         }
 
-        val controllerConfigState = viewModel.getTouchControllerConfig().collectAsState(null)
-        val touchControlsVisibleState = viewModel.isTouchControllerVisible().collectAsState(false)
-        val touchControllerSettingsState =
-            viewModel
-                .getTouchControlsSettings(LocalDensity.current, WindowInsets.displayCutout)
-                .collectAsState(null)
+        val controllerConfigFlow = remember(viewModel) { viewModel.getTouchControllerConfig() }
+        val touchVisibilityFlow = remember(viewModel) { viewModel.isTouchControllerVisible() }
+        val density = LocalDensity.current
+        val displayCutout = WindowInsets.displayCutout
+        val touchSettingsFlow = remember(viewModel, density, displayCutout) {
+            viewModel.getTouchControlsSettings(density, displayCutout)
+        }
+        val controllerConfigState = controllerConfigFlow.collectAsState(null)
+        val touchControlsVisibleState = touchVisibilityFlow.collectAsState(false)
+        val touchControllerSettingsState = touchSettingsFlow.collectAsState(null)
 
         val touchControllerSettings = touchControllerSettingsState.value
         val currentControllerConfig = controllerConfigState.value
+        val controllerId = currentControllerConfig?.touchControllerID?.name
+
+        // Also key the edit draft by controller type, so switching from DS to
+        // GBA never briefly displays or commits the other console's draft.
+        var draftPositions by remember(controllerId, isLandscape, editing) {
+            mutableStateOf<Map<String, TouchControllerSettingsManager.ControlPosition>?>(null)
+        }
+        var optimisticPositions by remember(controllerId, isLandscape) {
+            mutableStateOf<Map<String, TouchControllerSettingsManager.ControlPosition>?>(null)
+        }
+
+        // After Done, keep the just-saved layout visible until the settings flow
+        // acknowledges the persisted value. Otherwise the controls briefly jump home.
+        LaunchedEffect(optimisticPositions, touchControllerSettings?.controlPositions) {
+            if (optimisticPositions != null &&
+                touchControllerSettings?.controlPositions == optimisticPositions
+            ) {
+                optimisticPositions = null
+            }
+        }
+        val visiblePositions = if (editing) {
+            draftPositions ?: touchControllerSettings?.controlPositions.orEmpty()
+        } else {
+            optimisticPositions ?: touchControllerSettings?.controlPositions.orEmpty()
+        }
 
         val tiltConfiguration = viewModel.getTiltConfiguration().collectAsState(TiltConfiguration.Disabled)
         val tiltSimulatedStates = viewModel.getSimulatedTiltEvents().collectAsState(InputState())
@@ -184,16 +267,23 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                             )
                         }
 
-                        leftGamePad?.invoke(
-                            this,
-                            Modifier.layoutId(GameScreenLayout.CONSTRAINTS_LEFT_PAD),
-                            touchControllerSettings,
-                        )
-                        rightGamePad?.invoke(
-                            this,
-                            Modifier.layoutId(GameScreenLayout.CONSTRAINTS_RIGHT_PAD),
-                            touchControllerSettings,
-                        )
+                        CompositionLocalProvider(
+                            LocalControlLayoutBinding provides ControlLayoutBinding(
+                                positions = visiblePositions,
+                                reportBounds = { id, rect -> if (controlBounds[id] != rect) controlBounds[id] = rect },
+                            ),
+                        ) {
+                            leftGamePad?.invoke(
+                                this,
+                                Modifier.layoutId(GameScreenLayout.CONSTRAINTS_LEFT_PAD),
+                                touchControllerSettings,
+                            )
+                            rightGamePad?.invoke(
+                                this,
+                                Modifier.layoutId(GameScreenLayout.CONSTRAINTS_RIGHT_PAD),
+                                touchControllerSettings,
+                            )
+                        }
 
                         GameScreenRunningCentralMenu(
                             modifier = Modifier.layoutId(GameScreenLayout.CONSTRAINTS_GAME_CONTAINER),
@@ -204,6 +294,62 @@ fun MobileGameScreen(viewModel: BaseGameScreenViewModel) {
                     }
                 }
             }
+        }
+
+        if (controllerId != null) {
+            CustomShortcutOverlay(
+                viewModel = viewModel,
+                isLandscape = isLandscape,
+                editing = editing,
+                controllerId = controllerId,
+                resetRevision = shortcutResetRevision,
+            )
+        }
+
+
+
+        if (editing && touchControllerSettings != null && touchControlsVisibleState.value) {
+            val pixelsPerDp = LocalDensity.current.density
+            // PadKit renders the two optional DS controls (microphone and screen-close)
+            // outside the primary D-pad dial. On some DS layouts their modifier bounds
+            // aren't surfaced to the editor; derive edit hit-boxes from the D-pad geometry
+            // while retaining the native buttons and their existing input handlers.
+            val editorBounds =
+                if (controllerId == "MELONDS" || controllerId == "DESMUME") {
+                    dsExtraControlEditorBounds(controlBounds, visiblePositions, pixelsPerDp)
+                } else {
+                    controlBounds
+                }
+            ControlDragEditor(
+                bounds = editorBounds,
+                onDrag = { key, delta ->
+                    // Mutate the draft on EVERY drag delta, rather than onDragEnd.
+                    // Moving other buttons cannot revert previous positions.
+                    val current = draftPositions ?: touchControllerSettings.controlPositions
+                    val previous = current[key] ?: TouchControllerSettingsManager.ControlPosition()
+                    draftPositions = current + (
+                        key to previous.copy(
+                            dxDp = previous.dxDp + delta.x / pixelsPerDp,
+                            dyDp = previous.dyDp + delta.y / pixelsPerDp,
+                        )
+                    )
+                },
+                onReset = {
+                    draftPositions = emptyMap()
+                    if (controllerId != null) {
+                        resetConsoleShortcuts(context, controllerId, isLandscape)
+                        shortcutResetRevision += 1
+                    }
+                },
+                onDone = {
+                    val finalPositions = draftPositions ?: touchControllerSettings.controlPositions
+                    optimisticPositions = finalPositions
+                    viewModel.updateTouchControllerSettings(
+                        touchControllerSettings.copy(controlPositions = finalPositions),
+                    )
+                    viewModel.showEditControls(false)
+                },
+            )
         }
 
         val isLoading =
@@ -251,7 +397,7 @@ private fun GameScreenRunningCentralMenu(
             animationDurationMillis = MENU_LOADING_ANIMATION_MILLIS,
             icon = R.drawable.button_menu,
         )
-        MenuEditTouchControls(viewModel, controllerConfig, touchControllerSettings)
+        // Editing now uses the direct-manipulation editor over the game screen.
     }
 }
 
@@ -260,6 +406,7 @@ private fun MenuEditTouchControls(
     viewModel: BaseGameScreenViewModel,
     controllerConfig: ControllerConfig,
     touchControllerSettings: TouchControllerSettingsManager.Settings,
+    onEditShortcuts: () -> Unit,
 ) {
     val showEditControls = viewModel.isEditControlShown().collectAsState(false)
     if (!showEditControls.value) return
@@ -320,6 +467,12 @@ private fun MenuEditTouchControls(
                             },
                         )
                     }
+                }
+                TextButton(onClick = {
+                    viewModel.showEditControls(false)
+                    onEditShortcuts()
+                }) {
+                    Text("Move Quick Save / Quick Load / Cheats")
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),

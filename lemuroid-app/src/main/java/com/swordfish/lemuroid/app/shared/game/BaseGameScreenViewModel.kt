@@ -93,6 +93,9 @@ class BaseGameScreenViewModel(
         }
     }
 
+    val customCheatGameId: String = game.id.toString()
+    val customSaveStatesSupported: Boolean = systemCoreConfig.statesSupported
+
     private val sideEffects = GameViewModelSideEffects(viewModelScope)
     val retroGameView =
         GameViewModelRetroGameView(
@@ -265,6 +268,15 @@ class BaseGameScreenViewModel(
         withLoading {
             saves.loadQuickSave()
         }
+    }
+
+    /** Dispatch a code to the current libretro core. Some cores reject particular formats. */
+    fun setCustomCheat(index: Int, enabled: Boolean, code: String): Boolean {
+        val current = retroGameView.retroGameView ?: return false
+        return runCatching {
+            current.setCheat(index, enabled, code)
+            true
+        }.getOrDefault(false)
     }
 
     fun toggleFastForward() {

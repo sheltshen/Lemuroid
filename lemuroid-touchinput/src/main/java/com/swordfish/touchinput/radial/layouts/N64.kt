@@ -78,6 +78,7 @@ fun PadKitScope.N64Right(
                         .radialPosition(+80f - 180f)
                         .radialScale(2.0f),
                 id = Id.DiscreteDirection(ComposeTouchLayouts.MOTION_SOURCE_RIGHT_STICK),
+                layoutKey = "right_dpad",
                 allowDiagonals = false,
                 foreground = { LemuroidCrossForegroundAlternate(it) },
             )

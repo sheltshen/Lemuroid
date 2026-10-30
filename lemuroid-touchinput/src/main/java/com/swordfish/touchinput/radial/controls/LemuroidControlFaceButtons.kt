@@ -5,6 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.ui.Modifier
 import com.swordfish.touchinput.radial.LocalLemuroidPadTheme
+import com.swordfish.touchinput.radial.settings.controlLayout
 import com.swordfish.touchinput.radial.ui.LemuroidCompositeForeground
 import com.swordfish.touchinput.radial.ui.LemuroidControlBackground
 import gg.padkit.PadKitScope
@@ -31,7 +32,8 @@ fun LemuroidControlFaceButtons(
     ControlFaceButtons(
         modifier =
             modifier
-                .run { if (applyPadding) padding(theme.padding) else modifier },
+                .controlLayout("face_buttons")
+                .run { if (applyPadding) padding(theme.padding) else this },
         includeComposite = includeComposite,
         ids = ids,
         trackPointers = trackPointers,
@@ -56,7 +58,8 @@ fun LemuroidControlFaceButtons(
     ControlFaceButtons(
         modifier =
             modifier
-                .run { if (applyPadding) padding(theme.padding) else modifier },
+                .controlLayout("face_buttons")
+                .run { if (applyPadding) padding(theme.padding) else this },
         primaryAnchors = primaryAnchors,
         compositeAnchors = persistentListOf(),
         trackPointers = trackPointers,
